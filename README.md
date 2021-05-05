@@ -1,2 +1,2 @@
-# eta-parse
-File parsing library
+# eta-parser
+Rust file parsing library
