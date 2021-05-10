@@ -1,3 +1,7 @@
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Debug;
+use std::ops::Range;
+
 #[derive(Debug)]
 pub struct Parser<'a> {
     fields: Vec<Field<'a>>,
@@ -17,12 +21,14 @@ pub enum Justify {
     Right,
 }
 
-impl From<String> for Justify {
-    fn from(s: String) -> Self {
+impl TryFrom<&str> for Justify {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().trim() {
-            "right" => Justify::Right,
-            "left" => Justify::Left,
-            _ => panic!("Unknown value for Justify"),
+            "left" => Ok(Justify::Left),
+            "right" => Ok(Justify::Right),
+            _ => Err(String::from("Unknown justify argument")),
         }
     }
 }
@@ -98,20 +104,23 @@ mod builder {
             Parser { fields }
         }
 
-        pub fn default_justify<T: Into<Justify>>(mut self, justify: T) -> Self {
-            self.justify = justify.into();
+        pub fn default_justify<T: TryInto<Justify> + Debug>(mut self, justify: T) -> Self {
+            match justify.try_into() {
+                Ok(justify) => self.justify = justify,
+                Err(_) => eprintln!("Unable to parse argument as Justify"),
+            }
             self
         }
 
-        pub fn default_padding(mut self, padding: char) -> Self {
-            self.padding = padding;
+        pub fn default_padding<T: Into<char>>(mut self, padding: T) -> Self {
+            self.padding = padding.into();
             self
         }
 
-        pub fn field(self, name: &'a str) -> FieldBuilder<'a> {
+        pub fn field<T: Into<&'a str>>(self, name: T) -> FieldBuilder<'a> {
             let justify = self.justify;
             let padding = self.padding;
-            FieldBuilder::new(self, Some(name), justify, padding)
+            FieldBuilder::new(self, Some(name.into()), justify, padding)
         }
 
         pub fn spacer(self, range: Range<u32>) -> FieldBuilder<'a> {
@@ -165,13 +174,16 @@ mod builder {
             self
         }
 
-        pub fn justify<T: Into<Justify>>(mut self, justify: T) -> Self {
-            self.justify = justify.into();
+        pub fn justify<T: TryInto<Justify>>(mut self, justify: T) -> Self {
+            match justify.try_into() {
+                Ok(justify) => self.justify = justify,
+                Err(_) => eprintln!("Unable to parse argument as Justify"),
+            }
             self
         }
 
-        pub fn padding(mut self, padding: char) -> Self {
-            self.padding = padding;
+        pub fn padding<T: Into<char>>(mut self, padding: T) -> Self {
+            self.padding = padding.into();
             self
         }
 
@@ -237,6 +249,64 @@ impl<'a> Field<'a> {
         }
     }
 
+    pub fn with_index(mut self, index: u32) -> Self {
+        self.index = Some(index);
+        self
+    }
+
+    pub fn without_index(mut self) -> Self {
+        self.index = None;
+        self
+    }
+
+    pub fn with_name<T: Into<&'a str>>(mut self, name: T) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn without_name(mut self) -> Self {
+        self.name = None;
+        self
+    }
+
+    pub fn with_position(mut self, position: u32) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    pub fn without_position(mut self) -> Self {
+        self.position = None;
+        self
+    }
+
+    pub fn with_width(mut self, width: u32) -> Self {
+        self.width = Some(width);
+        self
+    }
+    pub fn without_width(mut self) -> Self {
+        self.width = None;
+        self
+    }
+
+    pub fn with_range(mut self, range: Range<u32>) -> Self {
+        self.position = Some(range.start);
+        self.width = Some(range.end - range.start);
+        self
+    }
+
+    pub fn with_justify<T: TryInto<Justify>>(mut self, justify: T) -> Self {
+        match justify.try_into() {
+            Ok(justify) => self.justify = justify,
+            Err(_) => eprintln!("Unable to parse argument as Justify"),
+        }
+        self
+    }
+
+    pub fn with_padding<T: Into<char>>(mut self, padding: T) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
     pub fn index(&self) -> u32 {
         self.index.expect("Index should have been set before use")
     }
@@ -262,9 +332,29 @@ impl<'a> Field<'a> {
     }
 }
 
+impl<'a> Default for Field<'a> {
+    fn default() -> Self {
+        Self {
+            index: None,
+            name: None,
+            position: None,
+            width: None,
+            justify: Justify::Left,
+            padding: ' ',
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_justify_into() {
+        assert_eq!(Justify::try_from("LEFT"), Ok(Justify::Left));
+        assert_eq!(Justify::try_from("Right"), Ok(Justify::Right));
+        assert!(matches!(Justify::try_from("Banana"), Err(_)));
+    }
 
     #[test]
     fn check_field_one() {
@@ -309,6 +399,89 @@ mod tests {
     }
 
     #[test]
+    fn check_field_position() {
+        let parser = Parser::builder()
+            .field("first")
+            .position(20)
+            .append()
+            .build();
+
+        assert_eq!(parser.fields.len(), 1);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(Some(0), Some("first"), Some(20), None, Justify::Left, ' ')
+        );
+    }
+
+    #[test]
+    fn check_field_range() {
+        let parser = Parser::builder()
+            .field("first")
+            .range(5..20)
+            .append()
+            .build();
+
+        assert_eq!(parser.fields.len(), 1);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(
+                Some(0),
+                Some("first"),
+                Some(5),
+                Some(15),
+                Justify::Left,
+                ' '
+            )
+        );
+    }
+
+    #[test]
+    fn check_field_justify() {
+        let parser = Parser::builder()
+            .field("first")
+            .width(20)
+            .justify("right")
+            .append()
+            .build();
+
+        assert_eq!(parser.fields.len(), 1);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(
+                Some(0),
+                Some("first"),
+                Some(0),
+                Some(20),
+                Justify::Right,
+                ' '
+            )
+        );
+    }
+
+    #[test]
+    fn check_field_padding() {
+        let parser = Parser::builder()
+            .field("first")
+            .width(20)
+            .padding('X')
+            .append()
+            .build();
+
+        assert_eq!(parser.fields.len(), 1);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(
+                Some(0),
+                Some("first"),
+                Some(0),
+                Some(20),
+                Justify::Left,
+                'X'
+            )
+        );
+    }
+
+    #[test]
     fn check_field_two() {
         let parser = Parser::builder()
             .field("first")
@@ -347,6 +520,82 @@ mod tests {
     }
 
     #[test]
+    fn check_field_insert() {
+        let parser = Parser::builder()
+            .field("first")
+            .width(20)
+            .append()
+            .field("second")
+            .range(20..50)
+            .justify(Justify::Right)
+            .padding('X')
+            .insert(0)
+            .build();
+
+        assert_eq!(parser.fields.len(), 2);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(
+                Some(0),
+                Some("second"),
+                Some(20),
+                Some(30),
+                Justify::Right,
+                'X'
+            )
+        );
+        assert_eq!(
+            parser.fields[1],
+            Field::_new(
+                Some(1),
+                Some("first"),
+                Some(50),
+                Some(20),
+                Justify::Left,
+                ' '
+            )
+        );
+    }
+
+    #[test]
+    fn check_field_two_stage() {
+        let mut builder = Parser::builder().field("first").width(20).append();
+
+        builder = builder
+            .field("second")
+            .range(20..50)
+            .justify(Justify::Right)
+            .padding('0')
+            .append();
+
+        let parser = builder.build();
+
+        assert_eq!(parser.fields.len(), 2);
+        assert_eq!(
+            parser.fields[0],
+            Field::_new(
+                Some(0),
+                Some("first"),
+                Some(0),
+                Some(20),
+                Justify::Left,
+                ' '
+            )
+        );
+        assert_eq!(
+            parser.fields[1],
+            Field::_new(
+                Some(1),
+                Some("second"),
+                Some(20),
+                Some(30),
+                Justify::Right,
+                '0'
+            )
+        );
+    }
+
+    #[test]
     fn check_spacer() {
         let parser = Parser::builder().spacer(5..15).append().build();
 
@@ -355,5 +604,20 @@ mod tests {
             parser.fields[0],
             Field::_new(Some(0), None, Some(5), Some(10), Justify::Left, ' ')
         );
+    }
+
+    #[test]
+    fn check_build_field() {
+        let field = Field::default()
+            .with_index(2)
+            .with_justify("right")
+            .with_range(10..30);
+
+        assert_eq!(field.index(), 2);
+        assert_eq!(field.name(), None);
+        assert_eq!(field.position(), Some(10));
+        assert_eq!(field.width(), Some(20));
+        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.padding(), ' ');
     }
 }
