@@ -78,8 +78,8 @@ impl<'a> Field<'a> {
         self
     }
 
-    pub fn with_name<T: Into<&'a str>>(mut self, name: T) -> Self {
-        self.name = Some(name.into());
+    pub fn with_name(mut self, name: &'a str) -> Self {
+        self.name = Some(name);
         self
     }
 
@@ -235,6 +235,13 @@ mod tests {
         let field = Field::default().with_justify("right");
 
         assert_eq!(field.justify(), Justify::Right);
+    }
+
+    #[test]
+    fn check_field_with_justify_error() {
+        let field = Field::default().with_justify("banana");
+
+        assert_eq!(field.justify(), Justify::Left);
     }
 
     #[test]

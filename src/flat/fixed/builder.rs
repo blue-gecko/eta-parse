@@ -2,18 +2,14 @@ use super::*;
 use std::collections::VecDeque;
 use std::ops::Range;
 
-trait Builder {
-    type Builder;
-
-    fn builder() -> Self::Builder;
-}
+use crate::builder::{Buildable, Builder};
 
 #[allow(dead_code)]
-impl<'a> Builder for Parser<'a> {
+impl<'a> Buildable for Parser<'a> {
     type Builder = ParserBuilder<'a>;
 
     fn builder() -> Self::Builder {
-        builder::ParserBuilder::new()
+        ParserBuilder::new()
     }
 }
 
@@ -44,7 +40,36 @@ impl<'a> ParserBuilder<'a> {
         self
     }
 
-    pub fn build(&mut self) -> Parser<'a> {
+    pub fn default_justify<T: TryInto<Justify> + Debug>(mut self, justify: T) -> Self {
+        match justify.try_into() {
+            Ok(justify) => self.justify = justify,
+            Err(_) => eprintln!("Unable to parse argument as Justify"),
+        }
+        self
+    }
+
+    pub fn default_padding<T: Into<char>>(mut self, padding: T) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
+    pub fn field(self, name: &'a str) -> FieldBuilder<'a> {
+        let justify = self.justify;
+        let padding = self.padding;
+        FieldBuilder::new(self, Some(name), justify, padding)
+    }
+
+    pub fn spacer(self, range: Range<u32>) -> FieldBuilder<'a> {
+        let justify = self.justify;
+        let padding = self.padding;
+        FieldBuilder::new(self, None, justify, padding).range(range)
+    }
+}
+
+impl<'a> Builder for ParserBuilder<'a> {
+    type Target = Parser<'a>;
+
+    fn build(&mut self) -> Self::Target {
         let mut fields: Vec<Field> = Vec::new();
         let mut position: u32 = 0;
         let mut index = 0;
@@ -59,12 +84,7 @@ impl<'a> ParserBuilder<'a> {
 
                     if let Some(mut previous) = fields.last_mut() {
                         if previous.width.is_none() {
-                            previous.width = Some(
-                                position
-                                    - previous
-                                        .position
-                                        .expect("Either position or width must be specified"),
-                            );
+                            previous.width = Some(position - previous.position.unwrap());
                         }
                     }
                 }
@@ -81,31 +101,6 @@ impl<'a> ParserBuilder<'a> {
             fields.push(current);
         }
         Parser { fields }
-    }
-
-    pub fn default_justify<T: TryInto<Justify> + Debug>(mut self, justify: T) -> Self {
-        match justify.try_into() {
-            Ok(justify) => self.justify = justify,
-            Err(_) => eprintln!("Unable to parse argument as Justify"),
-        }
-        self
-    }
-
-    pub fn default_padding<T: Into<char>>(mut self, padding: T) -> Self {
-        self.padding = padding.into();
-        self
-    }
-
-    pub fn field<T: Into<&'a str>>(self, name: T) -> FieldBuilder<'a> {
-        let justify = self.justify;
-        let padding = self.padding;
-        FieldBuilder::new(self, Some(name.into()), justify, padding)
-    }
-
-    pub fn spacer(self, range: Range<u32>) -> FieldBuilder<'a> {
-        let justify = self.justify;
-        let padding = self.padding;
-        FieldBuilder::new(self, None, justify, padding).range(range)
     }
 }
 
@@ -192,6 +187,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn check_builder_padding() {
+        let builder = Parser::builder().default_padding('X');
+
+        assert_eq!(builder.padding, 'X');
+    }
+
+    #[test]
+    fn check_builder_justify() {
+        let builder = Parser::builder().default_justify(Justify::Right);
+
+        assert_eq!(builder.justify, Justify::Right);
+    }
+
+    #[test]
+    fn check_builder_justify_from_string() {
+        let builder = Parser::builder().default_justify("RIGHT");
+
+        assert_eq!(builder.justify, Justify::Right);
+    }
+
+    #[test]
+    fn check_builder_justify_fail() {
+        let builder = Parser::builder().default_justify("banana");
+
+        assert_eq!(builder.justify, Justify::Left);
+    }
+
+    #[test]
     fn check_field_one() {
         let parser = Parser::builder().field("first").width(20).append().build();
 
@@ -229,6 +252,30 @@ mod tests {
                 Some(20),
                 Justify::Right,
                 '-'
+            )
+        );
+    }
+
+    #[test]
+    fn check_field_one_justify_fail() {
+        let parser = Parser::builder()
+            .default_justify(Justify::Right)
+            .field("first")
+            .width(20)
+            .justify("banana")
+            .append()
+            .build();
+
+        assert_eq!(parser.fields.len(), 1);
+        assert_eq!(
+            parser.fields[0],
+            Field::_raw(
+                Some(0),
+                Some("first"),
+                Some(0),
+                Some(20),
+                Justify::Right,
+                ' '
             )
         );
     }
@@ -394,7 +441,7 @@ mod tests {
 
     #[test]
     fn check_field_two_stage() {
-        let mut builder = Parser::builder().field("first").width(20).append();
+        let mut builder = Parser::builder().field("first").position(0).append();
 
         builder = builder
             .field("second")
@@ -428,6 +475,25 @@ mod tests {
                 '0'
             )
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Either position or width must be specified")]
+    fn check_field_one_missing_width() {
+        Parser::builder().field("first").append().build();
+    }
+
+    #[test]
+    #[should_panic(expected = "Position before current marker")]
+    fn check_field_two_position_error() {
+        Parser::builder()
+            .field("first")
+            .range(0..10)
+            .append()
+            .field("second")
+            .position(5)
+            .append()
+            .build();
     }
 
     #[test]
