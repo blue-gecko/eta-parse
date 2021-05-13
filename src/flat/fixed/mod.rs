@@ -1,8 +1,18 @@
-use std::convert::{TryFrom, TryInto};
+use std::collections::HashMap;
+use std::convert::{From, Into, TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::Range;
 
 mod builder;
+mod read;
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum LineBreak {
+    None,
+    NewLine,
+    CrLf,
+}
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -10,20 +20,29 @@ pub struct Parser<'a> {
 }
 
 #[allow(dead_code)]
+impl<'a> Parser<'a> {
+    fn parse<T: Into<String>>(&self, s: T) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.entry("key".to_string()).or_insert(s.into());
+        map
+    }
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Justify {
+pub enum Align {
     Left,
     Right,
 }
 
-impl TryFrom<&str> for Justify {
+impl TryFrom<&str> for Align {
     type Error = String;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().trim() {
-            "left" => Ok(Justify::Left),
-            "right" => Ok(Justify::Right),
-            _ => Err(String::from("Unknown justify argument")),
+            "left" => Ok(Align::Left),
+            "right" => Ok(Align::Right),
+            _ => Err(String::from("Unknown align argument")),
         }
     }
 }
@@ -34,7 +53,7 @@ pub struct Field<'a> {
     name: Option<&'a str>,
     position: Option<u32>,
     width: Option<u32>,
-    justify: Justify,
+    align: Align,
     padding: char,
 }
 
@@ -44,10 +63,10 @@ impl<'a> Field<'a> {
         name: Option<&'a str>,
         position: Option<u32>,
         width: Option<u32>,
-        justify: Justify,
+        align: Align,
         padding: char,
     ) -> Self {
-        Field::_raw(None, name, position, width, justify, padding)
+        Field::_raw(None, name, position, width, align, padding)
     }
 
     fn _raw(
@@ -55,7 +74,7 @@ impl<'a> Field<'a> {
         name: Option<&'a str>,
         position: Option<u32>,
         width: Option<u32>,
-        justify: Justify,
+        align: Align,
         padding: char,
     ) -> Self {
         Field {
@@ -63,7 +82,7 @@ impl<'a> Field<'a> {
             name,
             position,
             width,
-            justify,
+            align,
             padding,
         }
     }
@@ -113,10 +132,10 @@ impl<'a> Field<'a> {
         self
     }
 
-    pub fn with_justify<T: TryInto<Justify>>(mut self, justify: T) -> Self {
-        match justify.try_into() {
-            Ok(justify) => self.justify = justify,
-            Err(_) => eprintln!("Unable to parse argument as Justify"),
+    pub fn with_align<T: TryInto<Align>>(mut self, align: T) -> Self {
+        match align.try_into() {
+            Ok(align) => self.align = align,
+            Err(_) => eprintln!("Unable to parse argument as Align"),
         }
         self
     }
@@ -127,7 +146,7 @@ impl<'a> Field<'a> {
     }
 
     pub fn index(&self) -> u32 {
-        self.index.expect("Index should have been set before use")
+        self.index.expect("Index should be set before use")
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -142,8 +161,8 @@ impl<'a> Field<'a> {
         self.width
     }
 
-    pub fn justify(&self) -> Justify {
-        self.justify
+    pub fn align(&self) -> Align {
+        self.align
     }
 
     pub fn padding(&self) -> char {
@@ -158,7 +177,7 @@ impl<'a> Default for Field<'a> {
             name: None,
             position: None,
             width: None,
-            justify: Justify::Left,
+            align: Align::Left,
             padding: ' ',
         }
     }
@@ -169,10 +188,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_justify_into() {
-        assert_eq!(Justify::try_from("LEFT"), Ok(Justify::Left));
-        assert_eq!(Justify::try_from("Right"), Ok(Justify::Right));
-        assert!(matches!(Justify::try_from("Banana"), Err(_)));
+    fn check_align_into() {
+        assert_eq!(Align::try_from("LEFT"), Ok(Align::Left));
+        assert_eq!(Align::try_from("Right"), Ok(Align::Right));
+        assert!(matches!(Align::try_from("Banana"), Err(_)));
+    }
+
+    #[test]
+    fn check_parser() {
+        let parser = Parser { fields: Vec::new() };
+
+        assert_eq!(parser.fields.len(), 0);
+    }
+
+    #[test]
+    fn check_parsing() {
+        let parser = Parser { fields: Vec::new() };
+        let map = parser.parse("Some Text");
+
+        assert!(map.contains_key("key"));
+        assert_eq!(map.get("key"), Some(&String::from("Some Text")));
     }
 
     #[test]
@@ -183,7 +218,7 @@ mod tests {
         assert_eq!(field.name, None);
         assert_eq!(field.position, None);
         assert_eq!(field.width, None);
-        assert_eq!(field.justify, Justify::Left);
+        assert_eq!(field.align, Align::Left);
         assert_eq!(field.padding, ' ');
     }
 
@@ -224,24 +259,24 @@ mod tests {
     }
 
     #[test]
-    fn check_field_with_justify() {
-        let field = Field::default().with_justify(Justify::Right);
+    fn check_field_with_align() {
+        let field = Field::default().with_align(Align::Right);
 
-        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.align(), Align::Right);
     }
 
     #[test]
-    fn check_field_with_justify_from_string() {
-        let field = Field::default().with_justify("right");
+    fn check_field_with_align_from_string() {
+        let field = Field::default().with_align("right");
 
-        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.align(), Align::Right);
     }
 
     #[test]
-    fn check_field_with_justify_error() {
-        let field = Field::default().with_justify("banana");
+    fn check_field_with_align_error() {
+        let field = Field::default().with_align("banana");
 
-        assert_eq!(field.justify(), Justify::Left);
+        assert_eq!(field.align(), Align::Left);
     }
 
     #[test]
@@ -284,7 +319,7 @@ mod tests {
         let field = Field::default()
             .with_index(2)
             .with_name("foo")
-            .with_justify("right")
+            .with_align("right")
             .with_range(10..30)
             .with_padding('X');
 
@@ -292,37 +327,30 @@ mod tests {
         assert_eq!(field.name(), Some("foo"));
         assert_eq!(field.position(), Some(10));
         assert_eq!(field.width(), Some(20));
-        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.align(), Align::Right);
         assert_eq!(field.padding(), 'X');
     }
 
     #[test]
     fn check_field_raw() {
-        let field = Field::_raw(
-            Some(2),
-            Some("foo"),
-            Some(10),
-            Some(20),
-            Justify::Right,
-            'X',
-        );
+        let field = Field::_raw(Some(2), Some("foo"), Some(10), Some(20), Align::Right, 'X');
         assert_eq!(field.index(), 2);
         assert_eq!(field.name(), Some("foo"));
         assert_eq!(field.position(), Some(10));
         assert_eq!(field.width(), Some(20));
-        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.align(), Align::Right);
         assert_eq!(field.padding(), 'X');
     }
 
     #[test]
     fn check_field_new() {
-        let field = Field::new(Some("foo"), Some(10), Some(20), Justify::Right, 'X');
+        let field = Field::new(Some("foo"), Some(10), Some(20), Align::Right, 'X');
 
         assert_eq!(field.index, None);
         assert_eq!(field.name(), Some("foo"));
         assert_eq!(field.position(), Some(10));
         assert_eq!(field.width(), Some(20));
-        assert_eq!(field.justify(), Justify::Right);
+        assert_eq!(field.align(), Align::Right);
         assert_eq!(field.padding(), 'X');
     }
 }
