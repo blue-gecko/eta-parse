@@ -19,11 +19,14 @@ pub struct Parser<'a> {
     fields: Vec<Field<'a>>,
 }
 
-#[allow(dead_code)]
+// #[allow(dead_code)]
 impl<'a> Parser<'a> {
     fn parse<T: Into<String>>(&self, s: T) -> HashMap<String, String> {
         let mut map = HashMap::new();
-        map.entry("key".to_string()).or_insert(s.into());
+        let s = s.into();
+        for field in &self.fields {
+            field.parse(&mut map, &s);
+        }
         map
     }
 }
@@ -168,6 +171,26 @@ impl<'a> Field<'a> {
     pub fn padding(&self) -> char {
         self.padding
     }
+
+    pub fn range(&self) -> Range<usize> {
+        if let (Some(position), Some(width)) = (self.position(), self.width()) {
+            Range {
+                start: position as usize,
+                end: (position + width) as usize,
+            }
+        } else {
+            Range { start: 0, end: 0 }
+        }
+    }
+
+    fn parse<T: Into<String>>(&self, map: &mut HashMap<String, String>, s: T) {
+        if let Some(name) = self.name {
+            if let Some(extract) = s.into().get(self.range()) {
+                map.entry(name.to_string())
+                    .or_insert_with(|| extract.to_string());
+            }
+        }
+    }
 }
 
 impl<'a> Default for Field<'a> {
@@ -203,11 +226,25 @@ mod tests {
 
     #[test]
     fn check_parsing() {
-        let parser = Parser { fields: Vec::new() };
-        let map = parser.parse("Some Text");
+        let fields = vec![Field::default()
+            .with_index(0)
+            .with_name("test")
+            .with_range(0..10)];
+        let parser = Parser { fields };
+        let map = parser.parse("1234567890");
 
-        assert!(map.contains_key("key"));
-        assert_eq!(map.get("key"), Some(&String::from("Some Text")));
+        assert!(map.contains_key("test"));
+        assert_eq!(map.get("test"), Some(&String::from("1234567890")));
+    }
+
+    #[test]
+    fn check_field_parsing() {
+        let field = Field::default().with_name("test").with_range(0..5);
+        let mut map = HashMap::new();
+        field.parse(&mut map, "1234567890");
+
+        assert!(map.contains_key("test"));
+        assert_eq!(map.get("test"), Some(&String::from("12345")));
     }
 
     #[test]

@@ -30,7 +30,7 @@ where
     pub fn from_reader(reader: R, parser: &'a Parser) -> Self {
         Reader {
             lines: BufReader::new(reader).lines(),
-            parser: parser,
+            parser,
         }
     }
 
@@ -102,7 +102,7 @@ mod test {
 1111222233334444
 1111222233334444"#;
 
-        let parser = Parser::builder().build();
+        let parser = Parser::builder().field("test").range(0..4).append().build();
         let mut rdr = Reader::from_string(s, &parser);
 
         let rows = rdr
@@ -112,15 +112,15 @@ mod test {
         assert_eq!(rows.len(), 3);
 
         for row in rows {
-            assert!(row.contains_key("key"));
-            assert_eq!(row.get("key"), Some(&String::from("1111222233334444")))
+            assert!(row.contains_key("test"));
+            assert_eq!(row.get("test"), Some(&String::from("1111")))
         }
     }
     #[test]
     fn read_from_file() {
         let f = File::open(test_file("file-001.txt")).expect("Error reading test file");
 
-        let parser = Parser::builder().build();
+        let parser = Parser::builder().field("test").range(4..8).append().build();
         let mut rdr = Reader::from_file(f, &parser);
 
         let rows = rdr
@@ -130,8 +130,8 @@ mod test {
         assert_eq!(rows.len(), 3);
 
         for row in rows {
-            assert!(row.contains_key("key"));
-            assert_eq!(row.get("key"), Some(&String::from("11112222333344445555")))
+            assert!(row.contains_key("test"));
+            assert_eq!(row.get("test"), Some(&String::from("2222")))
         }
     }
 }
