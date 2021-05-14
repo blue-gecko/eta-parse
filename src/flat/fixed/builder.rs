@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::VecDeque;
 use std::ops::Range;
 
 use crate::builder::{Buildable, Builder};
@@ -15,7 +14,7 @@ impl<'a> Buildable for Parser<'a> {
 
 #[derive(Debug)]
 pub struct ParserBuilder<'a> {
-    fields: VecDeque<Field<'a>>,
+    fields: Vec<Field<'a>>,
     align: Align,
     padding: char,
 }
@@ -24,14 +23,14 @@ pub struct ParserBuilder<'a> {
 impl<'a> ParserBuilder<'a> {
     pub fn new() -> Self {
         ParserBuilder {
-            fields: VecDeque::new(),
+            fields: Vec::new(),
             align: Align::Left,
             padding: ' ',
         }
     }
 
     fn append(mut self, field: Field<'a>) -> Self {
-        self.fields.push_back(field);
+        self.fields.push(field);
         self
     }
 
@@ -59,10 +58,10 @@ impl<'a> ParserBuilder<'a> {
         FieldBuilder::new(self, Some(name), align, padding)
     }
 
-    pub fn spacer(self, range: Range<u32>) -> FieldBuilder<'a> {
+    pub fn spacer(self, range: Range<u32>) -> Self {
         let align = self.align;
         let padding = self.padding;
-        FieldBuilder::new(self, None, align, padding).range(range)
+        self.append(Field::new(None, range.end - range.start, align, padding))
     }
 }
 
@@ -70,31 +69,16 @@ impl<'a> Builder for ParserBuilder<'a> {
     type Target = Parser<'a>;
 
     fn build(&mut self) -> Self::Target {
-        let mut fields: Vec<Field> = Vec::new();
-        let mut position: u32 = 0;
-        let mut index = 0;
-        while let Some(mut current) = self.fields.pop_front() {
-            current.index = Some(index);
-            index += 1;
-            if let Some(p) = current.position {
-                if p < position {
-                    panic!("Position before current marker");
-                } else {
-                    position = p;
-                }
-            } else {
-                current.position = Some(position);
-            }
-
-            if let Some(w) = current.width {
-                position += w;
-            } else {
-                panic!("Width must be defined");
-            }
-
-            fields.push(current);
+        let mut width = 0;
+        Parser {
+            fields: self
+                .fields
+                .iter()
+                .copied()
+                .inspect(|f| width += f.width)
+                .collect(),
+            width: width as usize,
         }
-        Parser { fields }
     }
 }
 
@@ -102,7 +86,6 @@ impl<'a> Builder for ParserBuilder<'a> {
 pub struct FieldBuilder<'a> {
     parser: ParserBuilder<'a>,
     name: Option<&'a str>,
-    position: Option<u32>,
     width: Option<u32>,
     align: Align,
     padding: char,
@@ -114,16 +97,10 @@ impl<'a> FieldBuilder<'a> {
         FieldBuilder {
             parser,
             name,
-            position: None,
             width: None,
             align,
             padding,
         }
-    }
-
-    pub fn position(mut self, position: u32) -> Self {
-        self.position = Some(position);
-        self
     }
 
     pub fn width(mut self, width: u32) -> Self {
@@ -132,7 +109,6 @@ impl<'a> FieldBuilder<'a> {
     }
 
     pub fn range(mut self, range: Range<u32>) -> Self {
-        self.position = Some(range.start);
         self.width = Some(range.end - range.start);
         self
     }
@@ -167,8 +143,7 @@ impl<'a> Builder for FieldBuilder<'a> {
     fn build(&mut self) -> Self::Target {
         Field::new(
             self.name,
-            self.position,
-            self.width,
+            self.width.expect("Width must be specified"),
             self.align,
             self.padding,
         )
@@ -222,7 +197,7 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Left, ' ')
+            Field::new(Some("first"), 20, Align::Left, ' ')
         );
     }
 
@@ -239,7 +214,7 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Right, '-')
+            Field::new(Some("first"), 20, Align::Right, '-')
         );
     }
 
@@ -256,23 +231,18 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Right, ' ')
+            Field::new(Some("first"), 20, Align::Right, ' ')
         );
     }
 
     #[test]
-    fn check_field_position() {
-        let parser = Parser::builder()
-            .field("first")
-            .position(20)
-            .width(10)
-            .append()
-            .build();
+    fn check_field_width() {
+        let parser = Parser::builder().field("first").width(10).append().build();
 
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(20), Some(10), Align::Left, ' ')
+            Field::new(Some("first"), 10, Align::Left, ' ')
         );
     }
 
@@ -287,7 +257,7 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(5), Some(15), Align::Left, ' ')
+            Field::new(Some("first"), 15, Align::Left, ' ')
         );
     }
 
@@ -303,7 +273,7 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Right, ' ')
+            Field::new(Some("first"), 20, Align::Right, ' ')
         );
     }
 
@@ -319,7 +289,7 @@ mod tests {
         assert_eq!(parser.fields.len(), 1);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Left, 'X')
+            Field::new(Some("first"), 20, Align::Left, 'X')
         );
     }
 
@@ -339,18 +309,11 @@ mod tests {
         assert_eq!(parser.fields.len(), 2);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Left, ' ')
+            Field::new(Some("first"), 20, Align::Left, ' ')
         );
         assert_eq!(
             parser.fields[1],
-            Field::_raw(
-                Some(1),
-                Some("second"),
-                Some(20),
-                Some(30),
-                Align::Right,
-                '0'
-            )
+            Field::new(Some("second"), 30, Align::Right, '0')
         );
     }
 
@@ -370,28 +333,17 @@ mod tests {
         assert_eq!(parser.fields.len(), 2);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(
-                Some(0),
-                Some("second"),
-                Some(20),
-                Some(30),
-                Align::Right,
-                'X'
-            )
+            Field::new(Some("second"), 30, Align::Right, 'X')
         );
         assert_eq!(
             parser.fields[1],
-            Field::_raw(Some(1), Some("first"), Some(50), Some(20), Align::Left, ' ')
+            Field::new(Some("first"), 20, Align::Left, ' ')
         );
     }
 
     #[test]
     fn check_field_two_stage() {
-        let mut builder = Parser::builder()
-            .field("first")
-            .position(0)
-            .width(20)
-            .append();
+        let mut builder = Parser::builder().field("first").width(20).append();
 
         builder = builder
             .field("second")
@@ -405,49 +357,25 @@ mod tests {
         assert_eq!(parser.fields.len(), 2);
         assert_eq!(
             parser.fields[0],
-            Field::_raw(Some(0), Some("first"), Some(0), Some(20), Align::Left, ' ')
+            Field::new(Some("first"), 20, Align::Left, ' ')
         );
         assert_eq!(
             parser.fields[1],
-            Field::_raw(
-                Some(1),
-                Some("second"),
-                Some(20),
-                Some(30),
-                Align::Right,
-                '0'
-            )
+            Field::new(Some("second"), 30, Align::Right, '0')
         );
     }
 
     #[test]
-    #[should_panic(expected = "Width must be defined")]
+    #[should_panic(expected = "Width must be specified")]
     fn check_field_one_missing_width() {
         Parser::builder().field("first").append().build();
     }
 
     #[test]
-    #[should_panic(expected = "Position before current marker")]
-    fn check_field_two_position_error() {
-        Parser::builder()
-            .field("first")
-            .range(0..10)
-            .append()
-            .field("second")
-            .position(5)
-            .width(10)
-            .append()
-            .build();
-    }
-
-    #[test]
     fn check_spacer() {
-        let parser = Parser::builder().spacer(5..15).append().build();
+        let parser = Parser::builder().spacer(5..15).build();
 
         assert_eq!(parser.fields.len(), 1);
-        assert_eq!(
-            parser.fields[0],
-            Field::_raw(Some(0), None, Some(5), Some(10), Align::Left, ' ')
-        );
+        assert_eq!(parser.fields[0], Field::new(None, 10, Align::Left, ' '));
     }
 }

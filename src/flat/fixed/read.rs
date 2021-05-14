@@ -116,11 +116,17 @@ mod test {
             assert_eq!(row.get("test"), Some(&String::from("1111")))
         }
     }
+
     #[test]
     fn read_from_file() {
         let f = File::open(test_file("file-001.txt")).expect("Error reading test file");
 
-        let parser = Parser::builder().field("test").range(4..8).append().build();
+        let parser = Parser::builder()
+            .spacer(0..4)
+            .field("test")
+            .range(4..8)
+            .append()
+            .build();
         let mut rdr = Reader::from_file(f, &parser);
 
         let rows = rdr
@@ -132,6 +138,32 @@ mod test {
         for row in rows {
             assert!(row.contains_key("test"));
             assert_eq!(row.get("test"), Some(&String::from("2222")))
+        }
+    }
+
+    #[test]
+    fn read_from_unicode_string() {
+        let s = r#"会げク参入せうけざ次高ぶ提宝備ず開康ネフマ制員まびぶ限下びご社近め
+会げク参入せうけざ次高ぶ提宝備ず開康ネフマ制員まびぶ限下びご社近め
+会げク参入せうけざ次高ぶ提宝備ず開康ネフマ制員まびぶ限下びご社近め"#;
+
+        let parser = Parser::builder()
+            .spacer(0..10)
+            .field("test")
+            .range(10..20)
+            .append()
+            .build();
+        let mut rdr = Reader::from_string(s, &parser);
+
+        let rows = rdr
+            .string_reader()
+            .collect::<Vec<HashMap<String, String>>>();
+
+        assert_eq!(rows.len(), 3);
+
+        for row in rows {
+            assert!(row.contains_key("test"));
+            assert_eq!(row.get("test"), Some(&String::from("高ぶ提宝備ず開康ネフ")))
         }
     }
 }

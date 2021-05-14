@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::{From, Into, TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::Range;
+use std::str::Chars;
 
 mod builder;
 mod read;
@@ -17,21 +18,29 @@ pub enum LineBreak {
 #[derive(Debug)]
 pub struct Parser<'a> {
     fields: Vec<Field<'a>>,
+    width: usize,
 }
 
-// #[allow(dead_code)]
 impl<'a> Parser<'a> {
     fn parse<T: Into<String>>(&self, s: T) -> HashMap<String, String> {
+        let s: String = s.into();
+        self._parse(&mut s.chars().by_ref())
+    }
+
+    fn _parse(&self, chars: &mut Chars) -> HashMap<String, String> {
+        match chars.size_hint() {
+            (_, Some(max)) if max >= self.width => (),
+            _ => panic!("Insufficient buffer allocated"),
+        }
+
         let mut map = HashMap::new();
-        let s = s.into();
         for field in &self.fields {
-            field.parse(&mut map, &s);
+            field.parse(&mut map, chars);
         }
         map
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Align {
     Left,
@@ -50,54 +59,23 @@ impl TryFrom<&str> for Align {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Field<'a> {
-    index: Option<u32>,
     name: Option<&'a str>,
-    position: Option<u32>,
-    width: Option<u32>,
+    width: u32,
     align: Align,
     padding: char,
 }
 
 #[allow(dead_code)]
 impl<'a> Field<'a> {
-    fn new(
-        name: Option<&'a str>,
-        position: Option<u32>,
-        width: Option<u32>,
-        align: Align,
-        padding: char,
-    ) -> Self {
-        Field::_raw(None, name, position, width, align, padding)
-    }
-
-    fn _raw(
-        index: Option<u32>,
-        name: Option<&'a str>,
-        position: Option<u32>,
-        width: Option<u32>,
-        align: Align,
-        padding: char,
-    ) -> Self {
+    fn new(name: Option<&'a str>, width: u32, align: Align, padding: char) -> Self {
         Field {
-            index,
             name,
-            position,
             width,
             align,
             padding,
         }
-    }
-
-    pub fn with_index(mut self, index: u32) -> Self {
-        self.index = Some(index);
-        self
-    }
-
-    pub fn without_index(mut self) -> Self {
-        self.index = None;
-        self
     }
 
     pub fn with_name(mut self, name: &'a str) -> Self {
@@ -110,28 +88,13 @@ impl<'a> Field<'a> {
         self
     }
 
-    pub fn with_position(mut self, position: u32) -> Self {
-        self.position = Some(position);
-        self
-    }
-
-    pub fn without_position(mut self) -> Self {
-        self.position = None;
-        self
-    }
-
     pub fn with_width(mut self, width: u32) -> Self {
-        self.width = Some(width);
-        self
-    }
-    pub fn without_width(mut self) -> Self {
-        self.width = None;
+        self.width = width;
         self
     }
 
     pub fn with_range(mut self, range: Range<u32>) -> Self {
-        self.position = Some(range.start);
-        self.width = Some(range.end - range.start);
+        self.width = range.end - range.start;
         self
     }
 
@@ -148,19 +111,11 @@ impl<'a> Field<'a> {
         self
     }
 
-    pub fn index(&self) -> u32 {
-        self.index.expect("Index should be set before use")
-    }
-
     pub fn name(&self) -> Option<&str> {
         self.name
     }
 
-    pub fn position(&self) -> Option<u32> {
-        self.position
-    }
-
-    pub fn width(&self) -> Option<u32> {
+    pub fn width(&self) -> u32 {
         self.width
     }
 
@@ -172,23 +127,13 @@ impl<'a> Field<'a> {
         self.padding
     }
 
-    pub fn range(&self) -> Range<usize> {
-        if let (Some(position), Some(width)) = (self.position(), self.width()) {
-            Range {
-                start: position as usize,
-                end: (position + width) as usize,
-            }
-        } else {
-            Range { start: 0, end: 0 }
-        }
-    }
-
-    fn parse<T: Into<String>>(&self, map: &mut HashMap<String, String>, s: T) {
+    fn parse(&self, map: &mut HashMap<String, String>, chars: &mut Chars) {
+        let width = self.width() as usize;
         if let Some(name) = self.name {
-            if let Some(extract) = s.into().get(self.range()) {
-                map.entry(name.to_string())
-                    .or_insert_with(|| extract.to_string());
-            }
+            map.entry(name.to_string())
+                .or_insert_with(|| chars.take(width).collect::<String>());
+        } else {
+            chars.take(width).for_each(|_| {});
         }
     }
 }
@@ -196,10 +141,8 @@ impl<'a> Field<'a> {
 impl<'a> Default for Field<'a> {
     fn default() -> Self {
         Self {
-            index: None,
             name: None,
-            position: None,
-            width: None,
+            width: 0,
             align: Align::Left,
             padding: ' ',
         }
@@ -219,18 +162,18 @@ mod tests {
 
     #[test]
     fn check_parser() {
-        let parser = Parser { fields: Vec::new() };
+        let parser = Parser {
+            fields: Vec::new(),
+            width: 0,
+        };
 
         assert_eq!(parser.fields.len(), 0);
     }
 
     #[test]
     fn check_parsing() {
-        let fields = vec![Field::default()
-            .with_index(0)
-            .with_name("test")
-            .with_range(0..10)];
-        let parser = Parser { fields };
+        let fields = vec![Field::default().with_name("test").with_range(0..10)];
+        let parser = Parser { fields, width: 10 };
         let map = parser.parse("1234567890");
 
         assert!(map.contains_key("test"));
@@ -238,10 +181,51 @@ mod tests {
     }
 
     #[test]
+    fn check_parsing_two_fields() {
+        let fields = vec![
+            Field::default().with_name("test-1").with_range(0..5),
+            Field::default().with_name("test-2").with_range(5..10),
+        ];
+        let parser = Parser { fields, width: 10 };
+        let map = parser.parse("1234567890");
+
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("test-1"));
+        assert_eq!(map.get("test-1"), Some(&String::from("12345")));
+        assert!(map.contains_key("test-2"));
+        assert_eq!(map.get("test-2"), Some(&String::from("67890")));
+    }
+
+    #[test]
+    fn check_parsing_field_with_spacer() {
+        let fields = vec![
+            Field::default().with_range(0..5),
+            Field::default().with_name("test").with_range(5..10),
+        ];
+        let parser = Parser { fields, width: 10 };
+        let map = parser.parse("1234567890");
+
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("test"));
+        assert_eq!(map.get("test"), Some(&String::from("67890")));
+    }
+
+    #[test]
+    #[should_panic(expected = "Insufficient buffer allocated")]
+    fn check_parsing_small_buffer() {
+        let fields = vec![
+            Field::default().with_range(0..5),
+            Field::default().with_name("test").with_range(5..10),
+        ];
+        let parser = Parser { fields, width: 10 };
+        parser.parse("1234567");
+    }
+
+    #[test]
     fn check_field_parsing() {
         let field = Field::default().with_name("test").with_range(0..5);
         let mut map = HashMap::new();
-        field.parse(&mut map, "1234567890");
+        field.parse(&mut map, &mut "1234567890".chars());
 
         assert!(map.contains_key("test"));
         assert_eq!(map.get("test"), Some(&String::from("12345")));
@@ -251,19 +235,10 @@ mod tests {
     fn check_field_default() {
         let field = Field::default();
 
-        assert_eq!(field.index, None);
         assert_eq!(field.name, None);
-        assert_eq!(field.position, None);
-        assert_eq!(field.width, None);
+        assert_eq!(field.width, 0);
         assert_eq!(field.align, Align::Left);
         assert_eq!(field.padding, ' ');
-    }
-
-    #[test]
-    fn check_field_with_index() {
-        let field = Field::default().with_index(1);
-
-        assert_eq!(field.index(), 1);
     }
 
     #[test]
@@ -274,25 +249,17 @@ mod tests {
     }
 
     #[test]
-    fn check_field_with_position() {
-        let field = Field::default().with_position(10);
-
-        assert_eq!(field.position(), Some(10));
-    }
-
-    #[test]
     fn check_field_with_width() {
         let field = Field::default().with_width(20);
 
-        assert_eq!(field.width(), Some(20));
+        assert_eq!(field.width(), 20);
     }
 
     #[test]
     fn check_field_with_range() {
         let field = Field::default().with_range(5..20);
 
-        assert_eq!(field.position(), Some(5));
-        assert_eq!(field.width(), Some(15));
+        assert_eq!(field.width(), 15);
     }
 
     #[test]
@@ -324,13 +291,6 @@ mod tests {
     }
 
     #[test]
-    fn check_field_without_index() {
-        let field = Field::default().with_index(1).without_index();
-
-        assert_eq!(field.index, None);
-    }
-
-    #[test]
     fn check_field_without_name() {
         let field = Field::default().with_name("foo").without_name();
 
@@ -338,55 +298,25 @@ mod tests {
     }
 
     #[test]
-    fn check_field_without_position() {
-        let field = Field::default().with_position(10).without_position();
-
-        assert_eq!(field.position(), None);
-    }
-
-    #[test]
-    fn check_field_without_width() {
-        let field = Field::default().with_width(20).without_width();
-
-        assert_eq!(field.width(), None);
-    }
-
-    #[test]
     fn check_field_chained() {
         let field = Field::default()
-            .with_index(2)
             .with_name("foo")
             .with_align("right")
             .with_range(10..30)
             .with_padding('X');
 
-        assert_eq!(field.index(), 2);
         assert_eq!(field.name(), Some("foo"));
-        assert_eq!(field.position(), Some(10));
-        assert_eq!(field.width(), Some(20));
-        assert_eq!(field.align(), Align::Right);
-        assert_eq!(field.padding(), 'X');
-    }
-
-    #[test]
-    fn check_field_raw() {
-        let field = Field::_raw(Some(2), Some("foo"), Some(10), Some(20), Align::Right, 'X');
-        assert_eq!(field.index(), 2);
-        assert_eq!(field.name(), Some("foo"));
-        assert_eq!(field.position(), Some(10));
-        assert_eq!(field.width(), Some(20));
+        assert_eq!(field.width(), 20);
         assert_eq!(field.align(), Align::Right);
         assert_eq!(field.padding(), 'X');
     }
 
     #[test]
     fn check_field_new() {
-        let field = Field::new(Some("foo"), Some(10), Some(20), Align::Right, 'X');
+        let field = Field::new(Some("foo"), 20, Align::Right, 'X');
 
-        assert_eq!(field.index, None);
         assert_eq!(field.name(), Some("foo"));
-        assert_eq!(field.position(), Some(10));
-        assert_eq!(field.width(), Some(20));
+        assert_eq!(field.width(), 20);
         assert_eq!(field.align(), Align::Right);
         assert_eq!(field.padding(), 'X');
     }
