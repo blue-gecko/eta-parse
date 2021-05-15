@@ -1,4 +1,5 @@
 mod builder;
+mod error;
 mod flat;
 
 #[cfg(test)]

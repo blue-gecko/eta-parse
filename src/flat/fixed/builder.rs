@@ -1,9 +1,9 @@
-use super::*;
-use std::ops::Range;
+use crate::{
+    builder::{Buildable, Builder},
+    flat::fixed::{Align, Field, Parser},
+};
+use std::{convert::TryInto, ops::Range};
 
-use crate::builder::{Buildable, Builder};
-
-#[allow(dead_code)]
 impl<'a> Buildable for Parser<'a> {
     type Builder = ParserBuilder<'a>;
 
@@ -82,7 +82,6 @@ impl<'a> Builder for ParserBuilder<'a> {
     }
 }
 
-#[allow(dead_code)]
 pub struct FieldBuilder<'a> {
     parser: ParserBuilder<'a>,
     name: Option<&'a str>,

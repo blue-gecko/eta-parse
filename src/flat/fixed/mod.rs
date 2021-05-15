@@ -1,19 +1,18 @@
-use std::collections::HashMap;
-use std::convert::{From, Into, TryFrom, TryInto};
-use std::fmt::Debug;
-use std::ops::Range;
-use std::str::Chars;
+use crate::error::{Error, ParseError};
+use std::{
+    collections::HashMap,
+    convert::{From, Into, TryFrom, TryInto},
+    fmt::Debug,
+    ops::Range,
+    result::Result as StdResult,
+    str::Chars,
+};
 
 mod builder;
 mod read;
 
-#[allow(dead_code)]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum LineBreak {
-    None,
-    NewLine,
-    CrLf,
-}
+pub type Result<T> = StdResult<T, Error>;
+pub type FieldResult = Result<HashMap<String, String>>;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -22,22 +21,28 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn parse<T: Into<String>>(&self, s: T) -> HashMap<String, String> {
+    fn parse<T: Into<String>>(&self, s: T) -> FieldResult {
         let s: String = s.into();
         self._parse(&mut s.chars().by_ref())
     }
 
-    fn _parse(&self, chars: &mut Chars) -> HashMap<String, String> {
+    fn _parse(&self, chars: &mut Chars) -> FieldResult {
         match chars.size_hint() {
-            (_, Some(max)) if max >= self.width => (),
-            _ => panic!("Insufficient buffer allocated"),
+            (_, Some(max)) if max < self.width => {
+                return Err(Error::from(ParseError::ImsufficentBuffer(
+                    self.width,
+                    Some(max),
+                )))
+            }
+            (_, None) => return Err(Error::from(ParseError::ImsufficentBuffer(self.width, None))),
+            _ => (),
         }
 
         let mut map = HashMap::new();
         for field in &self.fields {
             field.parse(&mut map, chars);
         }
-        map
+        Ok(map)
     }
 }
 
@@ -50,7 +55,7 @@ pub enum Align {
 impl TryFrom<&str> for Align {
     type Error = String;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn try_from(s: &str) -> StdResult<Self, Self::Error> {
         match s.to_lowercase().trim() {
             "left" => Ok(Align::Left),
             "right" => Ok(Align::Right),
@@ -174,10 +179,11 @@ mod tests {
     fn check_parsing() {
         let fields = vec![Field::default().with_name("test").with_range(0..10)];
         let parser = Parser { fields, width: 10 };
-        let map = parser.parse("1234567890");
 
-        assert!(map.contains_key("test"));
-        assert_eq!(map.get("test"), Some(&String::from("1234567890")));
+        if let Ok(map) = parser.parse("1234567890") {
+            assert!(map.contains_key("test"));
+            assert_eq!(map.get("test"), Some(&String::from("1234567890")));
+        }
     }
 
     #[test]
@@ -187,13 +193,14 @@ mod tests {
             Field::default().with_name("test-2").with_range(5..10),
         ];
         let parser = Parser { fields, width: 10 };
-        let map = parser.parse("1234567890");
 
-        assert_eq!(map.len(), 2);
-        assert!(map.contains_key("test-1"));
-        assert_eq!(map.get("test-1"), Some(&String::from("12345")));
-        assert!(map.contains_key("test-2"));
-        assert_eq!(map.get("test-2"), Some(&String::from("67890")));
+        if let Ok(map) = parser.parse("1234567890") {
+            assert_eq!(map.len(), 2);
+            assert!(map.contains_key("test-1"));
+            assert_eq!(map.get("test-1"), Some(&String::from("12345")));
+            assert!(map.contains_key("test-2"));
+            assert_eq!(map.get("test-2"), Some(&String::from("67890")));
+        }
     }
 
     #[test]
@@ -203,22 +210,28 @@ mod tests {
             Field::default().with_name("test").with_range(5..10),
         ];
         let parser = Parser { fields, width: 10 };
-        let map = parser.parse("1234567890");
 
-        assert_eq!(map.len(), 1);
-        assert!(map.contains_key("test"));
-        assert_eq!(map.get("test"), Some(&String::from("67890")));
+        if let Ok(map) = parser.parse("1234567890") {
+            assert_eq!(map.len(), 1);
+            assert!(map.contains_key("test"));
+            assert_eq!(map.get("test"), Some(&String::from("67890")));
+        }
     }
 
     #[test]
-    #[should_panic(expected = "Insufficient buffer allocated")]
     fn check_parsing_small_buffer() {
         let fields = vec![
             Field::default().with_range(0..5),
             Field::default().with_name("test").with_range(5..10),
         ];
         let parser = Parser { fields, width: 10 };
-        parser.parse("1234567");
+        if let Err(e) = parser.parse("1234567") {
+            assert!(matches!(e, Error::ParserError(_)));
+            assert_eq!(
+                e.to_string(),
+                "Insufficient buffer size, required 10 only 7 available"
+            );
+        }
     }
 
     #[test]

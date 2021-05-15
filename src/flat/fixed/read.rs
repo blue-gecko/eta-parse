@@ -1,17 +1,15 @@
+use crate::flat::fixed::{FieldResult, Parser};
 use std::{
-    collections::HashMap,
     fs::File,
     io::{BufRead, BufReader, Cursor, Lines, Read},
 };
-
-use super::*;
 
 pub struct StringReader<'a, R: 'a> {
     r: &'a mut Reader<'a, R>,
 }
 
 impl<'a, R> StringReader<'a, R> {
-    fn parse(&self, s: String) -> HashMap<String, String> {
+    fn parse(&self, s: String) -> FieldResult {
         self.r.parser.parse(s)
     }
 }
@@ -43,7 +41,7 @@ impl<'a, R> Iterator for StringReader<'a, R>
 where
     R: Read,
 {
-    type Item = HashMap<String, String>;
+    type Item = FieldResult;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.r.lines.next() {
@@ -105,15 +103,14 @@ mod test {
         let parser = Parser::builder().field("test").range(0..4).append().build();
         let mut rdr = Reader::from_string(s, &parser);
 
-        let rows = rdr
-            .string_reader()
-            .collect::<Vec<HashMap<String, String>>>();
+        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
 
         assert_eq!(rows.len(), 3);
-
         for row in rows {
-            assert!(row.contains_key("test"));
-            assert_eq!(row.get("test"), Some(&String::from("1111")))
+            if let Ok(row) = row {
+                assert!(row.contains_key("test"));
+                assert_eq!(row.get("test"), Some(&String::from("1111")))
+            }
         }
     }
 
@@ -129,15 +126,14 @@ mod test {
             .build();
         let mut rdr = Reader::from_file(f, &parser);
 
-        let rows = rdr
-            .string_reader()
-            .collect::<Vec<HashMap<String, String>>>();
+        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
 
         assert_eq!(rows.len(), 3);
-
         for row in rows {
-            assert!(row.contains_key("test"));
-            assert_eq!(row.get("test"), Some(&String::from("2222")))
+            if let Ok(row) = row {
+                assert!(row.contains_key("test"));
+                assert_eq!(row.get("test"), Some(&String::from("2222")))
+            }
         }
     }
 
@@ -155,15 +151,14 @@ mod test {
             .build();
         let mut rdr = Reader::from_string(s, &parser);
 
-        let rows = rdr
-            .string_reader()
-            .collect::<Vec<HashMap<String, String>>>();
+        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
 
         assert_eq!(rows.len(), 3);
-
         for row in rows {
-            assert!(row.contains_key("test"));
-            assert_eq!(row.get("test"), Some(&String::from("高ぶ提宝備ず開康ネフ")))
+            if let Ok(row) = row {
+                assert!(row.contains_key("test"));
+                assert_eq!(row.get("test"), Some(&String::from("高ぶ提宝備ず開康ネフ")))
+            }
         }
     }
 }
