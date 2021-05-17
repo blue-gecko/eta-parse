@@ -1,4 +1,4 @@
-use crate::flat::fixed::{FieldResult, Parser};
+use crate::flat::fixed::{Parser, ResultRecord};
 use std::{
     fs::File,
     io::{BufRead, BufReader, Cursor, Lines, Read},
@@ -9,7 +9,7 @@ pub struct StringReader<'a, R: 'a> {
 }
 
 impl<'a, R> StringReader<'a, R> {
-    fn parse(&self, s: String) -> FieldResult {
+    fn parse(&self, s: String) -> ResultRecord {
         self.r.parser.parse(s)
     }
 }
@@ -41,7 +41,7 @@ impl<'a, R> Iterator for StringReader<'a, R>
 where
     R: Read,
 {
-    type Item = FieldResult;
+    type Item = ResultRecord;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.r.lines.next() {
@@ -103,7 +103,7 @@ mod test {
         let parser = Parser::builder().field("test").range(0..4).append().build();
         let mut rdr = Reader::from_string(s, &parser);
 
-        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
+        let rows = rdr.string_reader().collect::<Vec<ResultRecord>>();
 
         assert_eq!(rows.len(), 3);
         for row in rows {
@@ -126,7 +126,7 @@ mod test {
             .build();
         let mut rdr = Reader::from_file(f, &parser);
 
-        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
+        let rows = rdr.string_reader().collect::<Vec<ResultRecord>>();
 
         assert_eq!(rows.len(), 3);
         for row in rows {
@@ -151,7 +151,7 @@ mod test {
             .build();
         let mut rdr = Reader::from_string(s, &parser);
 
-        let rows = rdr.string_reader().collect::<Vec<FieldResult>>();
+        let rows = rdr.string_reader().collect::<Vec<ResultRecord>>();
 
         assert_eq!(rows.len(), 3);
         for row in rows {

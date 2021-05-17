@@ -24,9 +24,9 @@ impl Display for ParseError {
     }
 }
 
-/// An error produced while parsing fixed width data.
 #[allow(dead_code)]
 #[derive(Debug)]
+/// An error produced while parsing fixed width data.
 pub enum Error {
     /// An IO error occured while reading the data.
     IOError(io::Error),

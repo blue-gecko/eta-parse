@@ -1,6 +1,7 @@
 mod builder;
 mod error;
 mod flat;
+mod utilities;
 
 #[cfg(test)]
 mod tests {

@@ -1,18 +1,22 @@
-use crate::error::{Error, ParseError};
+use crate::{
+    error::{Error, ParseError},
+    utilities::string::{fixed_width, Align},
+};
 use std::{
+    borrow::Cow,
     collections::HashMap,
-    convert::{From, Into, TryFrom, TryInto},
+    convert::{From, Into, TryInto},
     fmt::Debug,
     ops::Range,
-    result::Result as StdResult,
+    result::Result,
     str::Chars,
 };
 
 mod builder;
 mod read;
 
-pub type Result<T> = StdResult<T, Error>;
-pub type FieldResult = Result<HashMap<String, String>>;
+pub type Record = HashMap<String, String>;
+pub type ResultRecord = Result<Record, Error>;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -20,13 +24,14 @@ pub struct Parser<'a> {
     width: usize,
 }
 
+#[allow(dead_code)]
 impl<'a> Parser<'a> {
-    fn parse<T: Into<String>>(&self, s: T) -> FieldResult {
+    fn parse<T: Into<String>>(&self, s: T) -> ResultRecord {
         let s: String = s.into();
         self._parse(&mut s.chars().by_ref())
     }
 
-    fn _parse(&self, chars: &mut Chars) -> FieldResult {
+    fn _parse(&self, chars: &mut Chars) -> ResultRecord {
         match chars.size_hint() {
             (_, Some(max)) if max < self.width => {
                 return Err(Error::from(ParseError::ImsufficentBuffer(
@@ -44,37 +49,39 @@ impl<'a> Parser<'a> {
         }
         Ok(map)
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Align {
-    Left,
-    Right,
-}
+    fn assemble(&self, data: Record) -> Cow<'a, str> {
+        self.fields
+            .iter()
+            .fold(String::with_capacity(self.width), |mut acc, f| {
+                acc.push_str(&*self.assemble_field(f, &data));
+                acc
+            })
+            .into()
+    }
 
-impl TryFrom<&str> for Align {
-    type Error = String;
-
-    fn try_from(s: &str) -> StdResult<Self, Self::Error> {
-        match s.to_lowercase().trim() {
-            "left" => Ok(Align::Left),
-            "right" => Ok(Align::Right),
-            _ => Err(String::from("Unknown align argument")),
+    fn assemble_field(&self, field: &Field<'a>, data: &Record) -> String {
+        let mut s = String::with_capacity(field.width() as usize);
+        if let Some(name) = field.name() {
+            if let Some(data) = data.get(name) {
+                s.push_str(data);
+            }
         }
+        fixed_width(&*s, field.width(), field.align(), field.padding()).to_string()
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Field<'a> {
     name: Option<&'a str>,
-    width: u32,
+    width: usize,
     align: Align,
     padding: char,
 }
 
 #[allow(dead_code)]
 impl<'a> Field<'a> {
-    fn new(name: Option<&'a str>, width: u32, align: Align, padding: char) -> Self {
+    fn new(name: Option<&'a str>, width: usize, align: Align, padding: char) -> Self {
         Field {
             name,
             width,
@@ -93,12 +100,12 @@ impl<'a> Field<'a> {
         self
     }
 
-    pub fn with_width(mut self, width: u32) -> Self {
+    pub fn with_width(mut self, width: usize) -> Self {
         self.width = width;
         self
     }
 
-    pub fn with_range(mut self, range: Range<u32>) -> Self {
+    pub fn with_range(mut self, range: Range<usize>) -> Self {
         self.width = range.end - range.start;
         self
     }
@@ -120,7 +127,7 @@ impl<'a> Field<'a> {
         self.name
     }
 
-    pub fn width(&self) -> u32 {
+    pub fn width(&self) -> usize {
         self.width
     }
 
@@ -157,13 +164,6 @@ impl<'a> Default for Field<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn check_align_into() {
-        assert_eq!(Align::try_from("LEFT"), Ok(Align::Left));
-        assert_eq!(Align::try_from("Right"), Ok(Align::Right));
-        assert!(matches!(Align::try_from("Banana"), Err(_)));
-    }
 
     #[test]
     fn check_parser() {

@@ -58,7 +58,7 @@ impl<'a> ParserBuilder<'a> {
         FieldBuilder::new(self, Some(name), align, padding)
     }
 
-    pub fn spacer(self, range: Range<u32>) -> Self {
+    pub fn spacer(self, range: Range<usize>) -> Self {
         let align = self.align;
         let padding = self.padding;
         self.append(Field::new(None, range.end - range.start, align, padding))
@@ -85,7 +85,7 @@ impl<'a> Builder for ParserBuilder<'a> {
 pub struct FieldBuilder<'a> {
     parser: ParserBuilder<'a>,
     name: Option<&'a str>,
-    width: Option<u32>,
+    width: Option<usize>,
     align: Align,
     padding: char,
 }
@@ -102,12 +102,12 @@ impl<'a> FieldBuilder<'a> {
         }
     }
 
-    pub fn width(mut self, width: u32) -> Self {
+    pub fn width(mut self, width: usize) -> Self {
         self.width = Some(width);
         self
     }
 
-    pub fn range(mut self, range: Range<u32>) -> Self {
+    pub fn range(mut self, range: Range<usize>) -> Self {
         self.width = Some(range.end - range.start);
         self
     }
