@@ -1,6 +1,7 @@
 use crate::{
     builder::{Buildable, Builder},
-    flat::fixed::{Align, Field, Parser},
+    flat::fixed::{Field, Parser},
+    utilities::string::Align,
 };
 use std::{convert::TryInto, ops::Range};
 

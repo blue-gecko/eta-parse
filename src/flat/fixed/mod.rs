@@ -1,9 +1,8 @@
 use crate::{
     error::{Error, ParseError},
-    utilities::string::{fixed_width, Align},
+    utilities::string::{fixed_width, strip_padding, Align},
 };
 use std::{
-    borrow::Cow,
     collections::HashMap,
     convert::{From, Into, TryInto},
     fmt::Debug,
@@ -14,6 +13,7 @@ use std::{
 
 mod builder;
 mod read;
+mod write;
 
 pub type Record = HashMap<String, String>;
 pub type ResultRecord = Result<Record, Error>;
@@ -28,11 +28,9 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     fn parse<T: Into<String>>(&self, s: T) -> ResultRecord {
         let s: String = s.into();
-        self._parse(&mut s.chars().by_ref())
-    }
-
-    fn _parse(&self, chars: &mut Chars) -> ResultRecord {
-        match chars.size_hint() {
+        let mut iter = s.chars();
+        let c = &mut iter.by_ref();
+        match c.size_hint() {
             (_, Some(max)) if max < self.width => {
                 return Err(Error::from(ParseError::ImsufficentBuffer(
                     self.width,
@@ -45,29 +43,18 @@ impl<'a> Parser<'a> {
 
         let mut map = HashMap::new();
         for field in &self.fields {
-            field.parse(&mut map, chars);
+            field.parse(&mut map, c);
         }
         Ok(map)
     }
 
-    fn assemble(&self, data: Record) -> Cow<'a, str> {
+    fn format(&self, data: Record) -> String {
         self.fields
             .iter()
-            .fold(String::with_capacity(self.width), |mut acc, f| {
-                acc.push_str(&*self.assemble_field(f, &data));
-                acc
+            .fold(String::with_capacity(self.width), |mut s, f| {
+                s.push_str(&*f.format(&data));
+                s
             })
-            .into()
-    }
-
-    fn assemble_field(&self, field: &Field<'a>, data: &Record) -> String {
-        let mut s = String::with_capacity(field.width() as usize);
-        if let Some(name) = field.name() {
-            if let Some(data) = data.get(name) {
-                s.push_str(data);
-            }
-        }
-        fixed_width(&*s, field.width(), field.align(), field.padding()).to_string()
     }
 }
 
@@ -142,11 +129,27 @@ impl<'a> Field<'a> {
     fn parse(&self, map: &mut HashMap<String, String>, chars: &mut Chars) {
         let width = self.width() as usize;
         if let Some(name) = self.name {
-            map.entry(name.to_string())
-                .or_insert_with(|| chars.take(width).collect::<String>());
+            map.entry(name.to_string()).or_insert_with(|| {
+                strip_padding(
+                    &chars.take(width).collect::<String>(),
+                    self.align(),
+                    self.padding(),
+                )
+                .to_string()
+            });
         } else {
             chars.take(width).for_each(|_| {});
         }
+    }
+
+    fn format(&self, data: &Record) -> String {
+        let mut s = String::with_capacity(self.width() as usize);
+        if let Some(name) = self.name() {
+            if let Some(data) = data.get(name) {
+                s.push_str(data);
+            }
+        }
+        fixed_width(&*s, self.width(), self.align(), self.padding()).to_string()
     }
 }
 
@@ -173,6 +176,59 @@ mod tests {
         };
 
         assert_eq!(parser.fields.len(), 0);
+    }
+
+    #[test]
+    fn check_format() {
+        let fields = vec![Field::default().with_name("test").with_range(0..10)];
+        let parser = Parser { fields, width: 10 };
+        let data: HashMap<String, String> = [(String::from("test"), String::from("ABCD"))]
+            .iter()
+            .cloned()
+            .collect();
+
+        assert_eq!(parser.format(data), "ABCD      ");
+    }
+
+    #[test]
+    fn check_format_two_fields() {
+        let fields = vec![
+            Field::default().with_name("test-1").with_range(0..5),
+            Field::default()
+                .with_name("test-2")
+                .with_range(5..10)
+                .with_align(Align::Right)
+                .with_padding('0'),
+        ];
+        let parser = Parser { fields, width: 10 };
+        let data: HashMap<String, String> = [
+            (String::from("test-1"), String::from("ABCD")),
+            (String::from("test-2"), String::from("1234")),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        assert_eq!(parser.format(data), "ABCD 01234");
+    }
+
+    #[test]
+    fn check_format_missing_data() {
+        let fields = vec![
+            Field::default().with_name("test-1").with_range(0..5),
+            Field::default()
+                .with_name("test-2")
+                .with_range(5..10)
+                .with_align(Align::Right)
+                .with_padding('0'),
+        ];
+        let parser = Parser { fields, width: 10 };
+        let data: HashMap<String, String> = [(String::from("test-1"), String::from("ABCD"))]
+            .iter()
+            .cloned()
+            .collect();
+
+        assert_eq!(parser.format(data), "ABCD 00000");
     }
 
     #[test]
@@ -235,6 +291,30 @@ mod tests {
     }
 
     #[test]
+    fn check_field_parsing_with_padding_left() {
+        let field = Field::default().with_name("test").with_range(0..5);
+        let mut map = HashMap::new();
+        field.parse(&mut map, &mut "A    BCDEF".chars());
+
+        assert!(map.contains_key("test"));
+        assert_eq!(map.get("test"), Some(&String::from("A")));
+    }
+
+    #[test]
+    fn check_field_parsing_with_padding_right() {
+        let field = Field::default()
+            .with_name("test")
+            .with_range(0..5)
+            .with_align(Align::Right)
+            .with_padding('X');
+        let mut map = HashMap::new();
+        field.parse(&mut map, &mut "XXXX123456".chars());
+
+        assert!(map.contains_key("test"));
+        assert_eq!(map.get("test"), Some(&String::from("1")));
+    }
+
+    #[test]
     fn check_field_parsing() {
         let field = Field::default().with_name("test").with_range(0..5);
         let mut map = HashMap::new();
@@ -242,6 +322,20 @@ mod tests {
 
         assert!(map.contains_key("test"));
         assert_eq!(map.get("test"), Some(&String::from("12345")));
+    }
+
+    #[test]
+    fn check_field_format() {
+        let field = Field::default().with_name("test-1").with_range(0..5);
+        let data: HashMap<String, String> = [
+            (String::from("test-1"), String::from("ABCD")),
+            (String::from("test-2"), String::from("1234")),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        assert_eq!(field.format(&data), "ABCD ");
     }
 
     #[test]
